@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import numpy as np
-import astropy.io.fits as pyfits
+from astropy.io import fits
 from matplotlib import pyplot as plt
 from matplotlib import rc
 from matplotlib.widgets import Cursor, Slider, Button
@@ -23,25 +23,28 @@ def boxcar(r, npt):
   return rs
 
 def onpress(event):
-	global hlam, cid1, cursor, l1, l2
-	if event.button == 1:
-		hlam = event.xdata
-		print("Selected line is centered on %.4f" %hlam)
-		fig1.canvas.mpl_disconnect(cid1)
-		width = swid.val
-		cent = sdist.val
-		l1, = ax1.bar(hlam-cent-width/2., height=1.4, width=width, color='blue', linewidth=0, alpha=0.3, align='edge')
-		l2, = ax1.bar(hlam+cent-width/2., height=1.4, width=width, color='blue', linewidth=0, alpha=0.3, align='edge')
-		plt.draw()
+    global hlam, cid1, cursor, l1, l2
+    if event.button == 1:
+        hlam = event.xdata
+        print(f"Selected line is centered on {hlam:.4f}")
+        fig1.canvas.mpl_disconnect(cid1)
+        width = swid.val
+        cent = sdist.val
+        l1, = ax1.bar(hlam-cent-width/2., height=1.4, width=width, color='blue', linewidth=0, alpha=0.3)
+        l2, = ax1.bar(hlam+cent-width/2., height=1.4, width=width, color='blue', linewidth=0, alpha=0.3)
+        plt.draw()
+        compfield(event)
+    return None
 
 
 def compfield(val):
     zlande = 1.0
-    F = -4.67*10**(-13)
+    F = 4.67*10**(-13)
     global hlam
     global l1, l2
     global istockes, vstockes, i_der
     global wli
+    global snr
     width = swid.val
     cent = sdist.val
     l1.set_x(hlam-cent-width/2.)
@@ -52,6 +55,7 @@ def compfield(val):
     vstockes_right = np.average(vstockes[(wli >= (hlam+cent-width/2.)) & (wli <= (hlam+cent+width/2.))])
     istockes_left = np.average(istockes[(wli >= (hlam-cent-width/2.)) & (wli <= (hlam-cent+width/2.))])
     istockes_right = np.average(istockes[(wli >= (hlam+cent-width/2.)) & (wli <= (hlam+cent+width/2.))])
+    i_sum = np.sum(istockes_left) + np.sum(istockes_right)
     wl_left = hlam-cent
     wl_right = hlam+cent
     i_der_left = np.average(i_der[(wli >= (hlam-cent-width/2.)) & (wli <= (hlam-cent+width/2.))])
@@ -62,84 +66,90 @@ def compfield(val):
     Be_left = (vstockes_left * istockes_left) / (F * zlande * wl_left * wl_left * i_der_left)
     Be_right = (vstockes_right * istockes_right) / (F * zlande * wl_right * wl_right * i_der_right)
     Be_aver = (vstockes_av * istockes_av) / (F * zlande * hlam * hlam * i_der_av)
-    print("Mean longitudinal magnetic field: left wing = %.0f G, right wing = %.0f G, average = %.0f  G (+/- 500 G)" %(Be_left, Be_right, Be_aver))
+    print(f"Mean longitudinal magnetic field: average = {-Be_aver:5.0f} G\tsigma = {1.3*10**4/np.sqrt(i_sum*2)/snr:.0f} G\t({-1.3*10**6*vstockes_av:.0f} G)")
     plt.draw()
-
+    return None
 
 def reset(event):
     swid.reset()
     sdist.reset()
+    return None
 
 def setline(event):
     global cid1, fig1
+    cursor = Cursor(ax1, useblit=True, color='red', linewidth=1)
     print("Please, mark center of the hydrogen line.")
     cid1 = fig1.canvas.mpl_connect('button_press_event', onpress)
+    return None
 
-if len(argv) < 2:
-    exit("Usage: %s <input FITS file>" %argv[0])
+if __name__ == "__main__":
+    if len(argv) < 2:
+        exit("Usage: %s <input FITS file>" %argv[0])
 
+    ifile1 = argv[1]
+    if ifile1.find('_1.f') != -1:
+        ifile2 = ifile1.replace('_1.', '_2.')
+    elif ifile1.find('_2.f') != -1:
+        ifile2 = ifile1.replace('_2.', '_1.')
 
-ifile1 = argv[1]
-if ifile1.find('_1.f') != -1:
-  ifile2 = ifile1.replace('_1.', '_2.')
-elif ifile1.find('_2.f') != -1:
-  ifile2 = ifile1.replace('_2.', '_1.')
+    print(f"File 1: {ifile1}, file 2: {ifile2}")
 
-print("File 1: ",ifile1, ", file 2: ", ifile2)
+    hdr1 = fits.getheader(ifile1)
+    hdr2 = fits.getheader(ifile2)
 
-hdr1 = pyfits.getheader(ifile1)
-hdr2 = pyfits.getheader(ifile2)
+    npix1 = hdr1['NAXIS1']; npix2 = hdr2['NAXIS1']
+    crval1 = hdr1['CRVAL1']; crval2 = hdr2['CRVAL1']
+    crpix1 = hdr1['CRPIX1']; crpix2 = hdr2['CRPIX1']
+    cdelt1 = hdr1['CDELT1']; cdelt2 = hdr2['CDELT1']
 
-npix1 = hdr1['NAXIS1']; npix2 = hdr2['NAXIS1']
-crval1 = hdr1['CRVAL1']; crval2 = hdr2['CRVAL1']
-crpix1 = hdr1['CRPIX1']; crpix2 = hdr2['CRPIX1']
-cdelt1 = hdr1['CDELT1']; cdelt2 = hdr2['CDELT1']
-objname = hdr1['OBJECT']
+    if 'SNR' in hdr1:
+       snr = hdr1['SNR']
+    else:
+       print("No valid SNR value in the header")
+       snr = 200.
 
-wl1 = crval1 + (np.arange(npix1) - crpix1) * cdelt1
-wl2 = crval2 + (np.arange(npix2) - crpix2) * cdelt2
-r1 = pyfits.getdata(ifile1); r2 = pyfits.getdata(ifile2)
-# determine
-wli = np.arange(max(wl1[0],wl2[0]), min(wl1[-1],wl2[-1]), cdelt1/3.)
-ri1 = interpol_spec(wl1, r1, wli, 0)
-ri2 = interpol_spec(wl2, r2, wli, 0)
-istockes = (ri1 + ri2) / 2.0
-vstockes = (ri1 - ri2) / (ri1 + ri2)
-i_der = interpol_spec(wli, istockes, wli, 1)
-i_2der = interpol_spec(wli, istockes, wli, 2)
+    wl1 = crval1 + (np.arange(npix1) - crpix1) * cdelt1
+    wl2 = crval2 + (np.arange(npix2) - crpix2) * cdelt2
+    r1 = fits.getdata(ifile1); r2 = fits.getdata(ifile2)
+    # determine
+    wli = np.arange(max(wl1[0],wl2[0]), min(wl1[-1],wl2[-1]), cdelt1/3.)
+    ri1 = interpol_spec(wl1, r1, wli, 0)
+    ri2 = interpol_spec(wl2, r2, wli, 0)
+    istockes = (ri1 + ri2) / 2.0
+    vstockes = (ri1 - ri2) / (ri1 + ri2)
+    i_der = interpol_spec(wli, istockes, wli, 1)
+    i_2der = interpol_spec(wli, istockes, wli, 2)
 
-fig1 = plt.figure(figsize=(15,5))
-ax1 = fig1.add_subplot(1,1,1)
-plt.subplots_adjust(bottom=0.35)
-ax1.set_title('Measure magnetic field of hydrogen lines\n object: '+objname)
-ax1.set_xlabel('wavelength, Angstroms')
-ax1.set_ylabel('residual intensity')
-ax1.plot(wli,ri1,"r-")
-ax1.plot(wli,ri2,"b-")
-ax1.plot(wli, vstockes+1.05, "g-")
-ax1.plot([wli[0], wli[-1]], [1.05, 1.05], color='gray', ls='--', lw=0.3)
+    fig1 = plt.figure(figsize=(15,5))
+    ax1 = fig1.add_subplot(1,1,1)
+    plt.subplots_adjust(bottom=0.35)
+    ax1.set_title('Measure magnetic field of hydrogen lines')
+    ax1.set_xlabel('Wavelength (Å)')
+    ax1.set_ylabel('Residual intensity')
+    ax1.plot(wli,ri1,"r-")
+    ax1.plot(wli,ri2,"b-")
+    ax1.plot(wli, vstockes*5+1.05, "g-")
 
-# widgets
-cursor = Cursor(ax1, useblit=True, color='red', linewidth=0.5)
-axwid = plt.axes([0.25, 0.1, 0.65, 0.03])
-axdist  = plt.axes([0.25, 0.20, 0.65, 0.03])
-swid = Slider(axwid, 'Width', 0.5, maxwidth, valinit=5)
-sdist = Slider(axdist, 'Distance', 0.5, maxdist, valinit=5)
-swid.on_changed(compfield)
-sdist.on_changed(compfield)
-setlax = plt.axes([0.25, 0.025, 0.1, 0.04])
-butsel = Button(setlax, 'Set line', color='grey', hovercolor='0.975')
-smeas = plt.axes([0.36, 0.025, 0.1, 0.04])
-butmeas = Button(smeas, 'Measure field', color='grey', hovercolor='0.975')
-butmeas.on_clicked(compfield)
-resetax = plt.axes([0.47, 0.025, 0.1, 0.04])
-butres = Button(resetax, 'Reset', color='grey', hovercolor='0.975')
-butres.on_clicked(reset)
-butsel.on_clicked(setline)
+    # widgets
+    axwid = plt.axes([0.25, 0.1, 0.65, 0.03])
+    axdist  = plt.axes([0.25, 0.20, 0.65, 0.03])
+    swid = Slider(axwid, 'Width', 0.5, maxwidth, valinit=5)
+    sdist = Slider(axdist, 'Distance', 0.5, maxdist, valinit=3.7) # valinit=5 in Landstreet's setup
+    swid.on_changed(compfield)
+    sdist.on_changed(compfield)
+    setlax = plt.axes([0.25, 0.025, 0.1, 0.04])
+    butsel = Button(setlax, 'Set line', color='grey', hovercolor='0.975')
+    smeas = plt.axes([0.36, 0.025, 0.1, 0.04])
+    butmeas = Button(smeas, 'Measure field', color='grey', hovercolor='0.975')
+    butmeas.on_clicked(compfield)
+    resetax = plt.axes([0.47, 0.025, 0.1, 0.04])
+    butres = Button(resetax, 'Reset', color='grey', hovercolor='0.975')
+    butres.on_clicked(reset)
+    butsel.on_clicked(setline)
 
-quitax = plt.axes([0.58, 0.025, 0.1, 0.04])
-butquit = Button(quitax, 'Quit', color='grey', hovercolor='0.975')
-butquit.on_clicked(exit)
-plt.show()
+    quitax = plt.axes([0.58, 0.025, 0.1, 0.04])
+    butquit = Button(quitax, 'Quit', color='grey', hovercolor='0.975')
+    butquit.on_clicked(exit)
+    plt.show()
 
-exit(0)
+    exit(0)
