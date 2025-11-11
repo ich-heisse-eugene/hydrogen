@@ -108,8 +108,8 @@ if __name__ == "__main__":
        print("No valid SNR value in the header")
        snr = 200.
 
-    wl1 = crval1 + (np.arange(npix1) - crpix1) * cdelt1
-    wl2 = crval2 + (np.arange(npix2) - crpix2) * cdelt2
+    wl1 = crval1 + (np.arange(npix1) - crpix1 + 1) * cdelt1
+    wl2 = crval2 + (np.arange(npix2) - crpix2 + 1) * cdelt2
     r1 = fits.getdata(ifile1); r2 = fits.getdata(ifile2)
     # determine
     wli = np.arange(max(wl1[0],wl2[0]), min(wl1[-1],wl2[-1]), cdelt1/3.)
